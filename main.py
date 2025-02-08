@@ -1,113 +1,112 @@
 import os
 import time
-import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message
-import cv2
-import numpy as np
+from moviepy.editor import VideoFileClip
+from hachoir.metadata import extractMetadata
+from hachoir.parser import createParser
 
-# Replace with your own values
-API_ID = "23883349"
-API_HASH = "9ae2939989ed439ab91419d66b61a4a4"
-BOT_TOKEN = "7763711532:AAGh6rz7TPCXb_dca2j26sbv77j6wN9plCM"
+# Replace these with your own values
+API_ID = "YOUR_API_ID"
+API_HASH = "YOUR_API_HASH"
+BOT_TOKEN = "YOUR_BOT_TOKEN"
 
+# Initialize the Pyrogram client
 app = Client("screenshot_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-@app.on_message(filters.command("start"))
-async def start_command(client: Client, message: Message):
-    await message.reply_text("👋 Welcome to the Screenshot Generator Bot!\n\n"
-                             "Send me a video, and I'll analyze it for you. "
-                             "Then you can generate up to 20 screenshots from it. 🎬📸")
+# Spinner animation for status updates
+spinner = ["🔄", "🌀", "🌪️", "🌊", "✨", "⚡", "💫", "🌟"]
 
+# Function to analyze video metadata
+def analyze_video(file_path: str):
+    parser = createParser(file_path)
+    metadata = extractMetadata(parser)
+    if not metadata:
+        return None
+    return {
+        "name": os.path.basename(file_path),
+        "size": f"{os.path.getsize(file_path) / (1024 * 1024):.2f} MB",
+        "duration": metadata.get("duration").seconds,
+        "format": metadata.get("format")
+    }
+
+# Function to generate screenshots
+def generate_screenshots(file_path: str, num_screenshots: int, duration: int):
+    clip = VideoFileClip(file_path)
+    timestamps = [i * (duration / num_screenshots) for i in range(num_screenshots)]
+    screenshots = []
+    for i, timestamp in enumerate(timestamps):
+        screenshot_path = f"screenshot_{i+1}.jpg"
+        clip.save_frame(screenshot_path, t=timestamp)
+        screenshots.append(screenshot_path)
+    clip.close()
+    return screenshots
+
+# Function to update status with animation
+async def update_status(message: Message, text: str, delay: float = 0.5):
+    for frame in spinner:
+        await message.edit_text(f"{frame} {text}")
+        time.sleep(delay)
+
+# Start command
+@app.on_message(filters.command("start"))
+async def start(client: Client, message: Message):
+    await message.reply_text("🎥 **Welcome to the Screenshot Generator Bot!**\n\n"
+                             "Send me a video, and I'll analyze it and generate screenshots for you! 🚀")
+
+# Handle video files
 @app.on_message(filters.video)
 async def handle_video(client: Client, message: Message):
-    video = message.video
-    file_name = f"{message.from_user.id}_{int(time.time())}.mp4"
-    
     # Download the video
-    await message.reply_text("⏳ Downloading and analyzing the video...")
-    await message.download(file_name)
-    
-    # Analyze video
-    cap = cv2.VideoCapture(file_name)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration = frame_count / fps if fps > 0 else 0
-    size = os.path.getsize(file_name) / (1024 * 1024)  # Size in MB
-    
-    # Send analysis results
-    await message.reply_text(f"📊 Video Analysis:\n\n"
-                             f"🎞️ Name: {video.file_name}\n"
-                             f"📏 Size: {size:.2f} MB\n"
-                             f"⏱️ Duration: {duration:.2f} seconds\n"
-                             f"🖼️ Format: {video.mime_type}\n\n"
-                             f"How many screenshots do you want? (1-20)")
-    
-    # Set user state
-    app.user_state[message.from_user.id] = {
-        "file_name": file_name,
-        "duration": duration,
-        "frame_count": frame_count
-    }
-    cap.release()
+    status_msg = await message.reply_text("📥 **Downloading video...**")
+    video_path = await message.download()
+    await update_status(status_msg, "📥 **Downloading video...**")
 
-@app.on_message(filters.text & filters.private)
-async def generate_screenshots(client: Client, message: Message):
-    user_id = message.from_user.id
-    if user_id not in app.user_state:
-        await message.reply_text("Please send a video first.")
+    # Analyze video metadata
+    await update_status(status_msg, "🔍 **Analyzing video...**")
+    video_info = analyze_video(video_path)
+    if not video_info:
+        await status_msg.edit_text("❌ **Failed to analyze the video. Please try again.**")
         return
-    
+
+    # Send video info
+    info_text = (
+        f"📄 **Video Name:** `{video_info['name']}`\n"
+        f"📦 **Size:** `{video_info['size']}`\n"
+        f"⏱️ **Duration:** `{video_info['duration']} seconds`\n"
+        f"📁 **Format:** `{video_info['format']}`\n\n"
+        "🛠️ **How many screenshots do you want?** (Enter a number)"
+    )
+    await status_msg.edit_text(info_text)
+
+    # Wait for user input
+    num_screenshots = await client.listen(message.chat.id, filters.text, timeout=30)
     try:
-        num_screenshots = int(message.text)
-        if num_screenshots < 1 or num_screenshots > 20:
+        num_screenshots = int(num_screenshots.text)
+        if num_screenshots <= 0:
             raise ValueError
-    except ValueError:
-        await message.reply_text("Please enter a valid number between 1 and 20.")
+    except (ValueError, AttributeError):
+        await status_msg.edit_text("❌ **Invalid input. Please enter a positive number.**")
         return
-    
-    file_name = app.user_state[user_id]["file_name"]
-    frame_count = app.user_state[user_id]["frame_count"]
-    
-    await message.reply_text(f"🎬 Generating {num_screenshots} screenshots...")
-    
+
     # Generate screenshots
-    cap = cv2.VideoCapture(file_name)
-    frames = []
-    for i in range(num_screenshots):
-        frame_position = int((i + 1) * frame_count / (num_screenshots + 1))
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_position)
-        ret, frame = cap.read()
-        if ret:
-            frames.append(frame)
-    cap.release()
-    
-    # Create a collage of screenshots
-    rows = int(np.ceil(np.sqrt(num_screenshots)))
-    cols = int(np.ceil(num_screenshots / rows))
-    cell_width = 640
-    cell_height = 360
-    collage = np.zeros((rows * cell_height, cols * cell_width, 3), dtype=np.uint8)
-    
-    for i, frame in enumerate(frames):
-        row = i // cols
-        col = i % cols
-        resized_frame = cv2.resize(frame, (cell_width, cell_height))
-        collage[row * cell_height:(row + 1) * cell_height,
-                col * cell_width:(col + 1) * cell_width] = resized_frame
-    
-    # Save and send the collage
-    collage_file = f"{user_id}_collage.jpg"
-    cv2.imwrite(collage_file, collage)
-    await message.reply_photo(collage_file, caption=f"🖼️ Here are your {num_screenshots} screenshots!")
-    
+    await update_status(status_msg, "🖼️ **Generating screenshots...**")
+    screenshots = generate_screenshots(video_path, num_screenshots, video_info["duration"])
+
+    # Send screenshots
+    await update_status(status_msg, "📤 **Uploading screenshots...**")
+    media_group = []
+    for screenshot in screenshots:
+        media_group.append({"type": "photo", "media": screenshot})
+    await client.send_media_group(message.chat.id, media_group)
+    await status_msg.edit_text("✅ **Screenshots generated successfully!**")
+
     # Clean up
-    os.remove(file_name)
-    os.remove(collage_file)
-    del app.user_state[user_id]
+    for screenshot in screenshots:
+        os.remove(screenshot)
+    os.remove(video_path)
 
-app.user_state = {}
-
-print("Bot is running...")
-app.run()
-
+# Run the bot
+if __name__ == "__main__":
+    print("Bot is running...")
+    app.run()
