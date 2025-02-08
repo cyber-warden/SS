@@ -1,108 +1,70 @@
-import os
 import asyncio
-import ffmpeg
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from PIL import Image
-from math import floor
+from video_processor import VideoProcessor
+from ui_helper import UIHelper
 
-# Bot credentials
 API_ID = "23883349"
 API_HASH = "9ae2939989ed439ab91419d66b61a4a4"
 BOT_TOKEN = "7763711532:AAGh6rz7TPCXb_dca2j26sbv77j6wN9plCM"
 
-# Initialize Pyrogram bot
-bot = Client("screenshot_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("screenshot_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+video_processor = VideoProcessor()
+ui_helper = UIHelper()
 
-# Dictionary to store user state (for screenshot count input)
-user_state = {}
+@app.on_message(filters.command("start"))
+async def start_command(client: Client, message: Message):
+    await message.reply_text(ui_helper.get_welcome_message())
 
-# Progress animation
-def get_progress_bar(percentage):
-    filled = floor(percentage * 5)
-    return "[" + "🟩" * filled + "⬜" * (5 - filled) + "]"
-
-@bot.on_message(filters.video)
-async def video_handler(client, message: Message):
+@app.on_message(filters.video)
+async def handle_video(client: Client, message: Message):
+    chat_id = message.chat.id
     video = message.video
-    file_name = video.file_name or "Unknown"
-    file_size = round(video.file_size / (1024 * 1024), 2)  # Convert to MB
-    duration = video.duration  # In seconds
-    mime_type = video.mime_type or "Unknown"
 
-    if not duration:
-        await message.reply("⚠️ Unable to analyze video duration. Please try another video.")
-        return
-
-    # Send video details
-    reply_text = f"📹 **Video Details:**\n" \
-                 f"📝 **Name:** `{file_name}`\n" \
-                 f"💾 **Size:** `{file_size} MB`\n" \
-                 f"⏳ **Duration:** `{duration} sec`\n" \
-                 f"🗂 **Format:** `{mime_type}`\n\n" \
-                 f"🔢 **How many screenshots do you want?** (Send a number)"
-    
-    sent_msg = await message.reply(reply_text)
-
-    # Store user state for the next input
-    user_state[message.chat.id] = {"message_id": sent_msg.id, "video": video}
-
-@bot.on_message(filters.text & filters.private)
-async def screenshot_request(client, message: Message):
-    user_id = message.chat.id
-
-    if user_id not in user_state:
-        return  # Ignore if user is not in state
+    # Send initial processing message
+    processing_msg = await message.reply_text("🎥 Processing your video... Please wait.")
 
     try:
-        num_screenshots = int(message.text)
-        if num_screenshots <= 0:
-            raise ValueError
-    except ValueError:
-        await message.reply("⚠️ Please enter a valid number (greater than 0).")
-        return
+        # Download video
+        video_path = await message.download()
 
-    # Retrieve stored video details
-    video_data = user_state.pop(user_id)
-    video = video_data["video"]
-    video_path = await bot.download_media(video)
+        # Analyze video
+        metadata = await video_processor.analyze_video(video_path)
 
-    duration = video.duration
-    output_images = []
-    progress_msg = await message.reply(f"⏳ **Processing...**\n{get_progress_bar(0)}")
+        # Update message with metadata and prompt
+        await processing_msg.edit_text(ui_helper.get_metadata_message(metadata))
 
-    try:
-        # First screenshot at 1s
-        first_screenshot_path = f"screenshot_1.jpg"
-        ffmpeg.input(video_path, ss=1).output(first_screenshot_path, vframes=1).run(quiet=True, overwrite_output=True)
-        output_images.append(first_screenshot_path)
+        # Wait for user input
+        while True:
+            try:
+                user_input = await client.wait_for_message(chat_id, timeout=300)  # 5 minutes timeout
+                num_screenshots = int(user_input.text)
+                if 1 <= num_screenshots <= 10:
+                    break
+                else:
+                    await message.reply_text("Please enter a number between 1 and 10.")
+            except ValueError:
+                await message.reply_text("Please enter a valid number.")
+            except asyncio.TimeoutError:
+                await message.reply_text("Timeout. Please send the video again.")
+                return
 
-        # Screenshots at equal intervals
-        interval = duration // num_screenshots
-        for i in range(1, num_screenshots + 1):
-            time_sec = i * interval
-            screenshot_path = f"screenshot_{i+1}.jpg"
-            ffmpeg.input(video_path, ss=time_sec).output(screenshot_path, vframes=1).run(quiet=True, overwrite_output=True)
-            output_images.append(screenshot_path)
-
-            # Update progress bar
-            progress = (i / num_screenshots)
-            await progress_msg.edit(f"⏳ **Processing...**\n{get_progress_bar(progress)}")
+        # Generate screenshots
+        progress_msg = await message.reply_text("Generating screenshots: [⬜⬜⬜⬜⬜]")
+        screenshots = await video_processor.generate_screenshots(video_path, num_screenshots, progress_callback=lambda p: asyncio.create_task(ui_helper.update_progress(progress_msg, p)))
 
         # Send screenshots
-        for img in output_images:
-            await message.reply_photo(img)
+        media_group = [InputMediaPhoto(screenshot) for screenshot in screenshots]
+        await client.send_media_group(chat_id, media_group)
 
-        await progress_msg.edit(f"✅ **Screenshots sent!**")
+        await progress_msg.delete()
+        await message.reply_text("✅ Screenshots generated successfully!")
 
     except Exception as e:
-        await message.reply(f"❌ **Error:** {str(e)}")
-
+        await message.reply_text(f"❌ An error occurred: {str(e)}")
     finally:
-        # Cleanup
-        os.remove(video_path)
-        for img in output_images:
-            os.remove(img)
+        # Clean up
+        video_processor.cleanup(video_path)
 
-# Run the bot
-bot.run()
+if __name__ == "__main__":
+    app.run()
