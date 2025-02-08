@@ -1,5 +1,4 @@
 pyrogram
 TgCrypto
-opencv-python
 moviepy
-numpy
+pillow
