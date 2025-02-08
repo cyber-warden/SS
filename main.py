@@ -7,9 +7,9 @@ import cv2
 import numpy as np
 
 # Replace with your own values
-API_ID = "your_api_id"
-API_HASH = "your_api_hash"
-BOT_TOKEN = "your_bot_token"
+API_ID = "23883349"
+API_HASH = "9ae2939989ed439ab91419d66b61a4a4"
+BOT_TOKEN = "7763711532:AAGh6rz7TPCXb_dca2j26sbv77j6wN9plCM"
 
 app = Client("screenshot_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
