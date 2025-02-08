@@ -7,9 +7,9 @@ from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 
 # Replace these with your own values
-API_ID = "YOUR_API_ID"
-API_HASH = "YOUR_API_HASH"
-BOT_TOKEN = "YOUR_BOT_TOKEN"
+API_ID = "23883349"
+API_HASH = "9ae2939989ed439ab91419d66b61a4a4"
+BOT_TOKEN = "7763711532:AAGh6rz7TPCXb_dca2j26sbv77j6wN9plCM"
 
 # Initialize the Pyrogram client
 app = Client("screenshot_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
