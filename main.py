@@ -4,13 +4,12 @@ import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message
 import cv2
-from moviepy.editor import VideoFileClip
 import numpy as np
 
 # Replace with your own values
-API_ID = "23883349"
-API_HASH = "9ae2939989ed439ab91419d66b61a4a4"
-BOT_TOKEN = "7763711532:AAGh6rz7TPCXb_dca2j26sbv77j6wN9plCM"
+API_ID = "your_api_id"
+API_HASH = "your_api_hash"
+BOT_TOKEN = "your_bot_token"
 
 app = Client("screenshot_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -30,23 +29,27 @@ async def handle_video(client: Client, message: Message):
     await message.download(file_name)
     
     # Analyze video
-    clip = VideoFileClip(file_name)
-    duration = int(clip.duration)
+    cap = cv2.VideoCapture(file_name)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration = frame_count / fps if fps > 0 else 0
     size = os.path.getsize(file_name) / (1024 * 1024)  # Size in MB
     
     # Send analysis results
     await message.reply_text(f"📊 Video Analysis:\n\n"
                              f"🎞️ Name: {video.file_name}\n"
                              f"📏 Size: {size:.2f} MB\n"
-                             f"⏱️ Duration: {duration} seconds\n"
+                             f"⏱️ Duration: {duration:.2f} seconds\n"
                              f"🖼️ Format: {video.mime_type}\n\n"
                              f"How many screenshots do you want? (1-20)")
     
     # Set user state
     app.user_state[message.from_user.id] = {
         "file_name": file_name,
-        "duration": duration
+        "duration": duration,
+        "frame_count": frame_count
     }
+    cap.release()
 
 @app.on_message(filters.text & filters.private)
 async def generate_screenshots(client: Client, message: Message):
@@ -64,7 +67,7 @@ async def generate_screenshots(client: Client, message: Message):
         return
     
     file_name = app.user_state[user_id]["file_name"]
-    duration = app.user_state[user_id]["duration"]
+    frame_count = app.user_state[user_id]["frame_count"]
     
     await message.reply_text(f"🎬 Generating {num_screenshots} screenshots...")
     
@@ -72,8 +75,8 @@ async def generate_screenshots(client: Client, message: Message):
     cap = cv2.VideoCapture(file_name)
     frames = []
     for i in range(num_screenshots):
-        time = int((i + 1) * duration / (num_screenshots + 1))
-        cap.set(cv2.CAP_PROP_POS_MSEC, time * 1000)
+        frame_position = int((i + 1) * frame_count / (num_screenshots + 1))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_position)
         ret, frame = cap.read()
         if ret:
             frames.append(frame)
