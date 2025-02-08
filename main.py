@@ -4,7 +4,6 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from moviepy.video.io.VideoFileClip import VideoFileClip
 from PIL import Image
-import time
 
 # Bot credentials
 API_ID = "23883349"
@@ -104,11 +103,19 @@ async def handle_video(client, message: Message):
 # Handle callback queries for screenshot count
 @app.on_callback_query()
 async def handle_callback_query(client, callback_query):
+    # Get the original video message
+    video_message = callback_query.message.reply_to_message
+
+    # Check if the original message exists
+    if not video_message or not video_message.video:
+        await callback_query.answer("❌ Error: Original video message not found. Please send the video again.")
+        return
+
+    # Get the number of screenshots from the callback data
     num_screenshots = int(callback_query.data)
     await callback_query.answer(f"Generating {num_screenshots} screenshots...")
 
-    # Download the video again (since it was deleted earlier)
-    video_message = callback_query.message.reply_to_message
+    # Download the video
     video_path = await video_message.download()
 
     # Generate screenshots
