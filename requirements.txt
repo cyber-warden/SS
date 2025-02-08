@@ -1,4 +1,4 @@
 pyrogram
-TgCrypto
-moviepy
+tgcrypto
+ffmpeg-python
 pillow
